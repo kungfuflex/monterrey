@@ -150,6 +150,9 @@ export class Monterrey extends EventEmitter {
     this.emit('debit', { account: key, amount });
     return true;
   }
+  async getBalance(key) {
+    return await this._backend.get(toBalanceKey(key));
+  }
   async getWallets() {
     const keys = await this._backend.keys();
     const ids = keys.filter((v) => v.match(toCountKey(''))).map((v) => v.replace(toCountKey(''), ''));

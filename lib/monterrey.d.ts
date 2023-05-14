@@ -50,6 +50,7 @@ export declare class Monterrey extends EventEmitter {
     generate(key: any, index?: any): Promise<any>;
     credit(key: any, amount: any): Promise<boolean>;
     debit(key: any, amount: any): Promise<boolean>;
+    getBalance(key: any): Promise<any>;
     getWallets(): Promise<any[]>;
     tick(): Promise<boolean>;
     start(): () => void;
