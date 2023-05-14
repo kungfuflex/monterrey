@@ -34,7 +34,7 @@ export const checkBalances = async function (addresses, provider, blockTag = 'la
       'mstore'
     ]);
   }, []).concat([toOffset(0x20 * addresses.length), toOffset(0x0), 'return']));
-  return ((await provider.call({ data }, blockTag)).substr(2).match(/(?:\w{64})/g) || []).map((v) => ethers.toBigInt('0x' + v));
+  return ((await provider.call({ data, blockTag })).substr(2).match(/(?:\w{64})/g) || []).map((v) => ethers.toBigInt('0x' + v));
 };
 
 export class FileBackend implements IBackend {
@@ -171,11 +171,11 @@ export class Monterrey extends EventEmitter {
   async tick() {
     const current = await this.provider.getBlockNumber();
     const blockNumber = await this._backend.get('@@block') || current;
-    if (blockNumber <= current) {
+    if (blockNumber < current) {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
-      const newBalances = await checkBalances(wallets, this.provider, newBlockNumber);
-      const oldBalances = await checkBalances(wallets, this.provider, blockNumber);
+      const newBalances = await checkBalances(wallets, this.provider, ethers.toBeHex(newBlockNumber));
+      const oldBalances = await checkBalances(wallets, this.provider, ethers.toBeHex(blockNumber));
       const flush = this._backend.flush;
       this._backend.flush = async () => {}; // make sure we flush all values synchronously
       for (const [ diff, i ] of newBalances.map((v, i) => [ v - oldBalances[i], i ])) {
@@ -194,7 +194,7 @@ export class Monterrey extends EventEmitter {
     let die = () => { halt = true; };
     let unsubscribe = () => { die(); };
     (async () => {
-      while (await this.tick() || !halt) {}
+      while (await this.tick() && !halt) {}
       const listener = (block) => {
         (async () => {
           await this.tick();
