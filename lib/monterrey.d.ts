@@ -1,6 +1,8 @@
 /// <reference types="node" />
 import { EventEmitter } from "events";
 import { getLogger } from "./logger";
+declare const ethersPromise: Promise<typeof import("ethers", { assert: { "resolution-mode": "import" } })>;
+export type Ethers = Awaited<typeof ethersPromise>;
 export declare const checkBalances: (addresses: any, provider: any, blockTag?: string) => Promise<any>;
 export declare class FileBackend implements IBackend {
     pathname: string;
@@ -47,7 +49,7 @@ export declare class Monterrey extends EventEmitter {
     count(key: any): Promise<any>;
     _setCache(key: any, index: any, value: any): void;
     _getCache(key: any, index: any): any;
-    generate(key: any, index?: any): Promise<any>;
+    generate(key: any, index?: any): Promise<import("ethers", { assert: { "resolution-mode": "import" } }).Wallet>;
     credit(key: any, amount: any): Promise<boolean>;
     debit(key: any, amount: any): Promise<boolean>;
     getBalance(key: any): Promise<any>;

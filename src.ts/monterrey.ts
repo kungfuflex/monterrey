@@ -5,13 +5,15 @@ import path from "path";
 import { mkdirp } from "mkdirp";
 import fs from "fs-extra";
 import { emasm } from "emasm";
-let ethers: any = {};
+const ethersPromise = import('ethers');
+export type Ethers = Awaited<typeof ethersPromise>;
+let ethers: Ethers = {} as Ethers;
 
 const logger = getLogger();
 
 const ready = new Promise<void>((resolve, reject) => {
   (async () => {
-    ethers = await import('ethers');
+    ethers = await ethersPromise;
     resolve();
   })().catch((err) => {
     logger.error(err);
