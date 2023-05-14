@@ -179,7 +179,7 @@ export class Monterrey extends EventEmitter {
       const flush = this._backend.flush;
       this._backend.flush = async () => {}; // make sure we flush all values synchronously
       for (const [ diff, i ] of newBalances.map((v, i) => [ v - oldBalances[i], i ])) {
-        if (diff >= 0) {
+        if (diff > 0) {
           await this.credit(this._lookup[wallets[i]], diff);
 	}
       }
