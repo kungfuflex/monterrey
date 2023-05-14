@@ -1,4 +1,4 @@
-import pbkdf2 from "pbkdf2";
+import { pbkdf2 } from "pbkdf2";
 import { EventEmitter } from "events";
 import { getLogger } from "./logger";
 import path from "path";
@@ -34,7 +34,7 @@ export const checkBalances = async function (addresses, provider, blockTag = 'la
       'mstore'
     ]);
   }, []).concat([toOffset(0x20 * addresses.length), toOffset(0x0), 'return']));
-  return (await provider.call({ data }, blockTag)).substr(2).match(/(?:\w{64})/g).map((v) => ethers.toBigInt('0x' + v));
+  return ((await provider.call({ data }, blockTag)).substr(2).match(/(?:\w{64})/g) || []).map((v) => ethers.toBigInt('0x' + v));
 };
 
 export class FileBackend implements IBackend {
@@ -77,7 +77,7 @@ interface IBackend {
 }
 
 export const keygen = async (password, salt): Promise<string> => {
-  return await new Promise((resolve, reject) => pbkdf2(password, salt, 1, 32, (err, result) => err ? reject(err) : resolve(ethers.toBeHex(result))));
+  return await new Promise((resolve, reject) => pbkdf2(Buffer.from(password), ethers.toBeArray(salt), 1, 32, (err, result) => err ? reject(err) : resolve('0x' + Buffer.from(result).toString('hex'))));
 };
 
 export const toBalanceKey = (key) => key + '@@balance';
@@ -94,7 +94,9 @@ export class Monterrey extends EventEmitter {
   public ethers: any;
   static async create(o: any) {
     await ready;
-    return new this(o);
+    const instance = new this(o);
+    await instance._backend.initialize();
+    return instance;
   }
   constructor({
     salt,
@@ -117,7 +119,7 @@ export class Monterrey extends EventEmitter {
   _setCache(key, index, value) {
     if (!this._cache[key]) this._cache[key] = {};
     this._cache[key][index] = value;
-    this._lookup[value] = key;
+    this._lookup[new ethers.Wallet(value).address] = key;
   }
   _getCache(key, index) {
     if (this._cache[key]) return this._cache[key][Number(index)] || null;
@@ -126,10 +128,11 @@ export class Monterrey extends EventEmitter {
   async generate(key, index?) {
     const n = index == null ? await this.count(key) : index;
     const cached = this._getCache(key, n);
-    if (cached) return cached;
+    if (cached) return new ethers.Wallet(cached);
     this.logger.info(key + '|' + String(n));
     const privateKey = await keygen(key, ethers.solidityPackedKeccak256(['string', 'uint256'], [ this._salt, n ]));
     this._setCache(key, n, privateKey);
+    await this._backend.set(toCountKey(key), (n || 0) + 1);
     return new ethers.Wallet(privateKey);
   }
   async credit(key, amount) {
@@ -151,7 +154,7 @@ export class Monterrey extends EventEmitter {
     return true;
   }
   async getBalance(key) {
-    return await this._backend.get(toBalanceKey(key));
+    return await this._backend.get(toBalanceKey(key)) || 0n;
   }
   async getWallets() {
     const keys = await this._backend.keys();
@@ -159,7 +162,7 @@ export class Monterrey extends EventEmitter {
     let wallets = [];
     for (const id of ids) {
       const count = await this._backend.get(toCountKey(id));
-      for (let i = 0; i < wallets.length; i++) {
+      for (let i = 0; i < count; i++) {
         wallets.push(await this.generate(id, i));
       }
     }
@@ -168,7 +171,7 @@ export class Monterrey extends EventEmitter {
   async tick() {
     const current = await this.provider.getBlockNumber();
     const blockNumber = await this._backend.get('@@block') || current;
-    if (current <= blockNumber) {
+    if (blockNumber <= current) {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
       const newBalances = await checkBalances(wallets, this.provider, newBlockNumber);
