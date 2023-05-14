@@ -138,7 +138,7 @@ export class Monterrey extends EventEmitter {
   async credit(key, amount) {
     const balanceKey = toBalanceKey(key);
     const balance = ethers.toBigInt(await this._backend.get(balanceKey) || '0x00');
-    await this._backend.set(key, ethers.toBeHex(balance + BigInt(amount)))
+    await this._backend.set(balanceKey, ethers.toBeHex(balance + BigInt(amount)))
     this.logger.info(key + '|+' + ethers.formatEther(BigInt(amount)));
     this.emit('credit', { account: key, amount });
     return true;
@@ -148,7 +148,7 @@ export class Monterrey extends EventEmitter {
     const balance = ethers.toBigInt(await this._backend.get(balanceKey) || '0x00');
     const newBalance = balance - BigInt(amount);
     if (newBalance < 0n) return false;
-    await this._backend.set(key, ethers.toBeHex(newBalance))
+    await this._backend.set(balanceKey, ethers.toBeHex(newBalance))
     this.logger.info(key + '|-' + ethers.formatEther(BigInt(amount)));
     this.emit('debit', { account: key, amount });
     return true;
