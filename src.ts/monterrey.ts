@@ -26,7 +26,7 @@ const toOffset = (v): string => {
   return ethers.toBeHex(ethers.toBigInt(v));
 };
 
-export const checkBalances = async function (
+export const checkBalances = async function(
   addresses,
   provider,
   blockTag = "latest"
@@ -44,6 +44,34 @@ export const checkBalances = async function (
     []
   ).map((v) => ethers.toBigInt("0x" + v));
 };
+
+const tokenAbi = [
+  {
+    "constant": true,
+    "inputs": [{ "name": "_owner", "type": "address" }],
+    "name": "balanceOf",
+    "outputs": [{ "name": "balance", "type": "uint256" }],
+    "payable": false,
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
+
+export const checkTokenBalances = async function(
+  addresses,
+  provider,
+  blockTag = "latest",
+  tokenAddress
+) {
+  const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
+  console.log(tokenAddress);
+  return Promise.all(addresses.map(async (address) => {
+    tokenContract.balanceOf(address, {
+      blockTag: blockTag,
+    })
+  }));
+}
+
 
 export class FileBackend implements IBackend {
   public pathname: string;
@@ -115,6 +143,8 @@ export class Monterrey extends EventEmitter {
   public logger: ReturnType<typeof getLogger>;
   public provider: any;
   public ethers: any;
+  public token_conversion_rate: { [key: string]: any };
+  public eth_conversion: any;
 
   static async create(o: any) {
     await ready;
@@ -123,7 +153,7 @@ export class Monterrey extends EventEmitter {
     return instance;
   }
 
-  constructor({ salt, backend, logger, provider }) {
+  constructor({ salt, backend, logger, provider, token_conversion_rate, eth_conversion }) {
     super();
     if (typeof backend === "string" || !backend)
       this._backend = new FileBackend(
@@ -134,6 +164,8 @@ export class Monterrey extends EventEmitter {
     this._lookup = {};
     this._cache = {};
     this.logger = logger || getLogger();
+    this.token_conversion_rate = token_conversion_rate || {};
+    this.eth_conversion = eth_conversion || 1n;
     this.provider =
       provider ||
       new ethers.InfuraProvider("mainnet", process.env.INFURA_PROJECT_ID);
@@ -234,14 +266,30 @@ export class Monterrey extends EventEmitter {
       );
 
       const flush = this._backend.flush;
-      this._backend.flush = async () => {}; // make sure we flush all values synchronously
+      this._backend.flush = async () => { }; // make sure we flush all values synchronously
 
       for (const [diff, i] of newBalances.map((v, i) => [
         v - oldBalances[i],
         i,
       ])) {
         if (diff > 0) {
-          await this.credit(this._lookup[wallets[i]], diff);
+          await this.credit(this._lookup[wallets[i]], diff * this.eth_conversion);
+        }
+      }
+
+      console.log("close to it");
+      for (const token in this.token_conversion_rate) {
+        console.log("IN it");
+        let oldBalances = await checkTokenBalances(wallets, token, this.provider, newBlockNumber);
+        let newBalances = await checkTokenBalances(wallets, token, this.provider, blockNumber);
+
+        for (const [diff, i] of newBalances.map((v, i) => [
+          v - oldBalances[i],
+          i,
+        ])) {
+          if (diff > 0) {
+            await this.credit(this._lookup[wallets[i]], diff * this.token_conversion_rate[token]);
+          }
         }
       }
 
@@ -262,7 +310,7 @@ export class Monterrey extends EventEmitter {
     };
 
     (async () => {
-      while ((await this.tick()) && !halt) {}
+      while ((await this.tick()) && !halt) { }
       const listener = (block) => {
         (async () => {
           await this.tick();
