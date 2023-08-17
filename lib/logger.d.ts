@@ -1,2 +1,3 @@
-export declare const createLogger: (proc?: string) => any;
-export declare function getLogger(): any;
+import { Logger } from "winston";
+export declare const createLogger: (proc?: string) => Logger;
+export declare function getLogger(): Logger;
