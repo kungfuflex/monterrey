@@ -11,6 +11,7 @@
   },
   "private": false,
   "dependencies": {
+    "bn.js": "^5.2.1",
     "emasm": "https://github.com/kungfuflex/emasm",
     "ethers": "^6.3.0",
     "fs-extra": "^11.1.1",
