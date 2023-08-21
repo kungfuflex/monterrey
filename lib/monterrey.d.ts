@@ -28,6 +28,10 @@ interface IBackend {
 export declare const keygen: (password: any, salt: any) => Promise<string>;
 export declare const toBalanceKey: (key: any) => string;
 export declare const toCountKey: (key: any) => string;
+export type Token = {
+    decimals: number;
+    conversionRate: number;
+};
 export declare class Monterrey extends EventEmitter {
     _cache: {
         [key: string]: any;
@@ -40,18 +44,18 @@ export declare class Monterrey extends EventEmitter {
     logger: ReturnType<typeof getLogger>;
     provider: any;
     ethers: any;
-    token_conversion_rate: {
-        [key: string]: any;
+    tokenConversionRate: {
+        [key: string]: Token;
     };
-    eth_conversion: any;
+    ethConversion: any;
     static create(o: any): Promise<Monterrey>;
-    constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, eth_conversion: ethConversion }: {
+    constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, ethConversion: ethConversion }: {
         salt: any;
         backend: any;
         logger: any;
         provider: any;
         tokenConversionRate: any;
-        eth_conversion: any;
+        ethConversion: any;
     });
     count(key: any): Promise<any>;
     _setCache(key: any, index: any, value: any): void;

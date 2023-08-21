@@ -46,8 +46,8 @@ export const checkBalances = async function(
 };
 
 const abi = [
-    'function transfer(address to, uint256 amount) returns (bool)',
-    'function balanceOf(address account) view returns (uint256)'
+  'function transfer(address to, uint256 amount) returns (bool)',
+  'function balanceOf(address account) view returns (uint256)'
 ];
 
 export const checkTokenBalances = async function(
@@ -127,6 +127,8 @@ export const keygen = async (password, salt): Promise<string> => {
 export const toBalanceKey = (key) => key + "@@balance";
 export const toCountKey = (key) => key + "@@count";
 
+export type Token = { decimals: number; conversionRate: number };
+
 export class Monterrey extends EventEmitter {
   public _cache: { [key: string]: any };
   public _lookup: { [key: string]: string };
@@ -135,8 +137,8 @@ export class Monterrey extends EventEmitter {
   public logger: ReturnType<typeof getLogger>;
   public provider: any;
   public ethers: any;
-  public token_conversion_rate: { [key: string]: any };
-  public eth_conversion: any;
+  public tokenConversionRate: { [key: string]: Token };
+  public ethConversion: any;
 
   static async create(o: any) {
     await ready;
@@ -145,7 +147,7 @@ export class Monterrey extends EventEmitter {
     return instance;
   }
 
-  constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, eth_conversion: ethConversion }) {
+  constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, ethConversion: ethConversion }) {
     super();
     if (typeof backend === "string" || !backend)
       this._backend = new FileBackend(
@@ -156,8 +158,8 @@ export class Monterrey extends EventEmitter {
     this._lookup = {};
     this._cache = {};
     this.logger = logger || getLogger();
-    this.token_conversion_rate = tokenConversionRate || {};
-    this.eth_conversion = ethConversion || 1n;
+    this.tokenConversionRate = tokenConversionRate || {};
+    this.ethConversion = ethConversion || 1n;
     this.provider =
       provider ||
       new ethers.InfuraProvider("mainnet", process.env.INFURA_PROJECT_ID);
@@ -265,20 +267,24 @@ export class Monterrey extends EventEmitter {
         i,
       ])) {
         if (diff > 0) {
-          await this.credit(this._lookup[wallets[i]], diff * this.eth_conversion);
+          await this.credit(this._lookup[wallets[i]], diff * this.ethConversion);
         }
       }
 
-      for (const token in this.token_conversion_rate) {
-        let oldBalances = await checkTokenBalances(wallets, this.provider, blockNumber, token);
-        let newBalances = await checkTokenBalances(wallets, this.provider, newBlockNumber, token);
+      for (const address in this.tokenConversionRate) {
+        let oldBalances = await checkTokenBalances(wallets, this.provider, blockNumber, address);
+        let newBalances = await checkTokenBalances(wallets, this.provider, newBlockNumber, address);
+        const token = this.tokenConversionRate[address];
 
         for (const [diff, i] of newBalances.map((v, i) => [
           v - oldBalances[i],
           i,
         ])) {
-          if (diff > 0) {
-            await this.credit(this._lookup[wallets[i]], ethers.toBigInt(diff) * ethers.toBigInt(this.token_conversion_rate[token]));
+          if (diff > 0n) {
+            let multiple = ethers.toBigInt(diff) * ethers.toBigInt(token.conversionRate)
+            let credit = multiple / 10n ** ethers.toBigInt(token.decimals)
+            console.log(credit)
+            await this.credit(this._lookup[wallets[i]], credit * 10n ** (18n - ethers.toBigInt(token.decimals)));
           }
         }
       }
