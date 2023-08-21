@@ -45,12 +45,12 @@ export declare class Monterrey extends EventEmitter {
     };
     eth_conversion: any;
     static create(o: any): Promise<Monterrey>;
-    constructor({ salt, backend, logger, provider, token_conversion_rate, eth_conversion }: {
+    constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, eth_conversion: ethConversion }: {
         salt: any;
         backend: any;
         logger: any;
         provider: any;
-        token_conversion_rate: any;
+        tokenConversionRate: any;
         eth_conversion: any;
     });
     count(key: any): Promise<any>;

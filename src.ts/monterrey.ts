@@ -45,16 +45,9 @@ export const checkBalances = async function(
   ).map((v) => ethers.toBigInt("0x" + v));
 };
 
-const tokenAbi = [
-  {
-    "constant": true,
-    "inputs": [{ "name": "_owner", "type": "address" }],
-    "name": "balanceOf",
-    "outputs": [{ "name": "balance", "type": "uint256" }],
-    "payable": false,
-    "stateMutability": "view",
-    "type": "function"
-  }
+const abi = [
+    'function transfer(address to, uint256 amount) returns (bool)',
+    'function balanceOf(address account) view returns (uint256)'
 ];
 
 export const checkTokenBalances = async function(
@@ -63,10 +56,9 @@ export const checkTokenBalances = async function(
   blockTag = "latest",
   tokenAddress
 ) {
-  const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
-  console.log(tokenAddress);
+  const tokenContract = new ethers.Contract(tokenAddress, abi, provider);
   return Promise.all(addresses.map(async (address) => {
-    tokenContract.balanceOf(address, {
+    return tokenContract.balanceOf(address, {
       blockTag: blockTag,
     })
   }));
@@ -153,7 +145,7 @@ export class Monterrey extends EventEmitter {
     return instance;
   }
 
-  constructor({ salt, backend, logger, provider, token_conversion_rate, eth_conversion }) {
+  constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, eth_conversion: ethConversion }) {
     super();
     if (typeof backend === "string" || !backend)
       this._backend = new FileBackend(
@@ -164,8 +156,8 @@ export class Monterrey extends EventEmitter {
     this._lookup = {};
     this._cache = {};
     this.logger = logger || getLogger();
-    this.token_conversion_rate = token_conversion_rate || {};
-    this.eth_conversion = eth_conversion || 1n;
+    this.token_conversion_rate = tokenConversionRate || {};
+    this.eth_conversion = ethConversion || 1n;
     this.provider =
       provider ||
       new ethers.InfuraProvider("mainnet", process.env.INFURA_PROJECT_ID);
@@ -277,18 +269,16 @@ export class Monterrey extends EventEmitter {
         }
       }
 
-      console.log("close to it");
       for (const token in this.token_conversion_rate) {
-        console.log("IN it");
-        let oldBalances = await checkTokenBalances(wallets, token, this.provider, newBlockNumber);
-        let newBalances = await checkTokenBalances(wallets, token, this.provider, blockNumber);
+        let oldBalances = await checkTokenBalances(wallets, this.provider, blockNumber, token);
+        let newBalances = await checkTokenBalances(wallets, this.provider, newBlockNumber, token);
 
         for (const [diff, i] of newBalances.map((v, i) => [
           v - oldBalances[i],
           i,
         ])) {
           if (diff > 0) {
-            await this.credit(this._lookup[wallets[i]], diff * this.token_conversion_rate[token]);
+            await this.credit(this._lookup[wallets[i]], ethers.toBigInt(diff) * ethers.toBigInt(this.token_conversion_rate[token]));
           }
         }
       }
