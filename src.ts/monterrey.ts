@@ -34,6 +34,7 @@ export const checkBalances = async function(
   provider,
   blockTag = "latest",
 ) {
+  console.log("asdf", addresses, tokens);
   const pausm = [
     "0x70a0823100000000000000000000000000000000000000000000000000000000",
     "0x0",
@@ -46,21 +47,24 @@ export const checkBalances = async function(
           toOffset(0x24 + i * 0x20 * (tokens.length + 1)),
           "mstore",
         ];
-        const tokenSegments = tokens.map((token, tokenIndex) => [
-          toOffset(0x20),
-          toOffset(0x24 + (i * 0x20 * (tokens.length + 1) + tokenIndex)),
-          "0x24",
-          "0x0",
-          "0x0",
-          token,
-          "gas",
-          v,
-          "0x4",
-          "mstore",
-          "staticcall",
-          "pop",
-        ]);
-        return r.concat(segment.concat(tokenSegments));
+        const tokenSegments = tokens.map((token, tokenIndex) => {
+          console.log("offset", toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))))
+          return [
+            toOffset(0x20),
+            // toOffset(0x24 + (i * 0x20 * (tokens.length + 1) + tokenIndex)),
+            toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))),
+            "0x24",
+            "0x0",
+            token,
+            "gas",
+            v,
+            "0x4",
+            "mstore",
+            "staticcall",
+            "pop",
+          ];
+        });
+        return r.concat(segment);
       }, [])
       .concat([
         toOffset(0x20 * addresses.length * (tokens.length + 1)),
@@ -68,9 +72,10 @@ export const checkBalances = async function(
         "return",
       ]),
   ];
+  console.log(pausm);
   const data = emasm(pausm);
   const ret = await provider.call({ data, blockTag });
-  console.log(ret);
+  console.log("ret", ret.length, ret);
   return (
     (ret).substr(2).match(/(?:\w{64})/g) ||
     []
@@ -315,7 +320,8 @@ export class Monterrey extends EventEmitter {
               },
           );
       };
-      console.log("before ---");
+
+      console.log("\n\n\n--- before ---");
       const oldBalances = chunkBalances(
         await checkBalances(
           wallets,
@@ -325,7 +331,7 @@ export class Monterrey extends EventEmitter {
         ),
       );
 
-      console.log("after ---");
+      console.log("--- after ---");
       const newBalances = chunkBalances(
         await checkBalances(
           wallets,
@@ -334,8 +340,6 @@ export class Monterrey extends EventEmitter {
           ethers.toBeHex(newBlockNumber),
         ),
       );
-
-      console.log("chunked balances", oldBalances, newBalances);
       const flush = this._backend.flush;
       this._backend.flush = async () => { }; // make sure we flush all values synchronously
       let allDiffs = newBalances.flatMap((v, i) => {
@@ -347,8 +351,7 @@ export class Monterrey extends EventEmitter {
           ]
         });
       })
-      console.log("all diffs", allDiffs);
-      
+
       for (const [token, diff, i] of allDiffs) {
         // @ts-ignore
         if (diff > 0) {
