@@ -1,10 +1,12 @@
 import { pbkdf2 } from "pbkdf2";
 import { EventEmitter } from "events";
+import { chunk } from "lodash";
 import { getLogger } from "./logger";
 import path from "path";
 import { mkdirp } from "mkdirp";
 import fs from "fs-extra";
 import { emasm } from "emasm";
+import { add } from "winston";
 const ethersPromise = import("ethers");
 export type Ethers = Awaited<typeof ethersPromise>;
 let ethers: Ethers = {} as Ethers;
@@ -26,13 +28,13 @@ const toOffset = (v): string => {
   return ethers.toBeHex(ethers.toBigInt(v));
 };
 
-export const checkBalances = async function (
+export const checkBalances = async function(
   addresses,
   tokens,
   provider,
   blockTag = "latest",
 ) {
-  return emasm([
+  const pausm = [
     "0x70a0823100000000000000000000000000000000000000000000000000000000",
     "0x0",
     "mstore",
@@ -58,17 +60,19 @@ export const checkBalances = async function (
           "staticcall",
           "pop",
         ]);
-        return segment.concat(tokenSegments);
+        return r.concat(segment.concat(tokenSegments));
       }, [])
       .concat([
         toOffset(0x20 * addresses.length * (tokens.length + 1)),
         toOffset(0x24),
         "return",
       ]),
-  ]);
-
+  ];
+  const data = emasm(pausm);
+  const ret = await provider.call({ data, blockTag });
+  console.log(ret);
   return (
-    (await provider.call({ data, blockTag })).substr(2).match(/(?:\w{64})/g) ||
+    (ret).substr(2).match(/(?:\w{64})/g) ||
     []
   ).map((v) => ethers.toBigInt("0x" + v));
 };
@@ -85,7 +89,7 @@ const tokenAbi = [
   },
 ];
 
-export const checkTokenBalances = async function (
+export const checkTokenBalances = async function(
   addresses,
   provider,
   blockTag = "latest",
@@ -160,6 +164,8 @@ export const keygen = async (password, salt): Promise<string> => {
   );
 };
 
+export type Token = { decimals: number; conversionRate: number; };
+
 export const toBalanceKey = (key) => key + "@@balance";
 export const toCountKey = (key) => key + "@@count";
 
@@ -171,7 +177,7 @@ export class Monterrey extends EventEmitter {
   public logger: ReturnType<typeof getLogger>;
   public provider: any;
   public ethers: any;
-  public tokenConversionRate: { [key: string]: any };
+  public tokenConversionRate: { [key: string]: Token };
   public ethConversion: any;
 
   static async create(o: any) {
@@ -289,9 +295,10 @@ export class Monterrey extends EventEmitter {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
       const tokens = Object.keys(this.tokenConversionRate);
-      const rates = tokens.map((v) => this.tokenConversionRate[v]);
+      const rates = tokens.map((v) => this.tokenConversionRate[v].conversionRate);
       const chunkBalances = (ary) => {
         const balances = chunk(ary, ary.length / (tokens.length + 1));
+        console.log("bal", ary, ary.length);
         const ether = balances[0];
         const token = balances.slice(1);
         return Array(balances.length)
@@ -299,24 +306,16 @@ export class Monterrey extends EventEmitter {
           .map((v, i) =>
             i === 0
               ? {
-                  token: "ETH",
-                  balance: balances[0],
-                }
+                token: "ETH",
+                balance: balances[0],
+              }
               : {
-                  token: tokens[i - 1],
-                  balance: balances[i],
-                },
+                token: tokens[i - 1],
+                balance: balances[i],
+              },
           );
       };
-      const newBalances = chunkBalances(
-        await checkBalances(
-          wallets,
-          tokens,
-          this.provider,
-          ethers.toBeHex(newBlockNumber),
-        ),
-      );
-
+      console.log("before ---");
       const oldBalances = chunkBalances(
         await checkBalances(
           wallets,
@@ -326,21 +325,41 @@ export class Monterrey extends EventEmitter {
         ),
       );
 
-      const flush = this._backend.flush;
-      this._backend.flush = async () => {}; // make sure we flush all values synchronously
+      console.log("after ---");
+      const newBalances = chunkBalances(
+        await checkBalances(
+          wallets,
+          tokens,
+          this.provider,
+          ethers.toBeHex(newBlockNumber),
+        ),
+      );
 
-      for (const [token, diff, i] of newBalances.map((v, i) => [
-        v.token,
-        v.balance - oldBalances[i].balance,
-        i,
-      ])) {
+      console.log("chunked balances", oldBalances, newBalances);
+      const flush = this._backend.flush;
+      this._backend.flush = async () => { }; // make sure we flush all values synchronously
+      let allDiffs = newBalances.flatMap((v, i) => {
+        return v.balance.map((innerV, j) => {
+          return [
+            v.token,
+            innerV - oldBalances[i].balance[j],
+            j,
+          ]
+        });
+      })
+      console.log("all diffs", allDiffs);
+      
+      for (const [token, diff, i] of allDiffs) {
+        // @ts-ignore
         if (diff > 0) {
+          console.log(token, diff);
           await this.credit(
             this._lookup[wallets[i]],
+            // @ts-ignore
             diff *
-              (token === "ETH"
-                ? this.ethConversion
-                : this.tokenConversionRate[token]),
+            (token === "ETH"
+              ? this.ethConversion
+              : this.tokenConversionRate[token].conversionRate),
           );
         }
       }
@@ -361,7 +380,7 @@ export class Monterrey extends EventEmitter {
     };
 
     (async () => {
-      while ((await this.tick()) && !halt) {}
+      while ((await this.tick()) && !halt) { }
       const listener = (block) => {
         (async () => {
           await this.tick();
