@@ -34,7 +34,6 @@ export const checkBalances = async function(
   provider,
   blockTag = "latest",
 ) {
-  console.log("asdf", addresses, tokens);
   const pausm = [
     "0x70a0823100000000000000000000000000000000000000000000000000000000",
     "0x0",
@@ -48,10 +47,8 @@ export const checkBalances = async function(
           "mstore",
         ];
         const tokenSegments = tokens.map((token, tokenIndex) => {
-          console.log("offset", toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))))
           return [
             toOffset(0x20),
-            // toOffset(0x24 + (i * 0x20 * (tokens.length + 1) + tokenIndex)),
             toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))),
             "0x24",
             "0x0",
@@ -64,7 +61,7 @@ export const checkBalances = async function(
             "pop",
           ];
         });
-        return r.concat(segment);
+        return r.concat(segment.concat(tokenSegments));
       }, [])
       .concat([
         toOffset(0x20 * addresses.length * (tokens.length + 1)),
@@ -72,10 +69,9 @@ export const checkBalances = async function(
         "return",
       ]),
   ];
-  console.log(pausm);
   const data = emasm(pausm);
   const ret = await provider.call({ data, blockTag });
-  console.log("ret", ret.length, ret);
+  console.log((ret.length - 2) / 64, addresses.length, tokens.length);
   return (
     (ret).substr(2).match(/(?:\w{64})/g) ||
     []
@@ -169,7 +165,7 @@ export const keygen = async (password, salt): Promise<string> => {
   );
 };
 
-export type Token = { decimals: number; conversionRate: number; };
+export type Token = { decimals: number; conversionRate: number; symbol?: string };
 
 export const toBalanceKey = (key) => key + "@@balance";
 export const toCountKey = (key) => key + "@@count";
@@ -255,7 +251,7 @@ export class Monterrey extends EventEmitter {
       balanceKey,
       ethers.toBeHex(balance + BigInt(amount)),
     );
-    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)));
+    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)) + " CREDIT");
     this.emit("credit", { account: key, amount });
     return true;
   }
@@ -300,28 +296,26 @@ export class Monterrey extends EventEmitter {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
       const tokens = Object.keys(this.tokenConversionRate);
-      const rates = tokens.map((v) => this.tokenConversionRate[v].conversionRate);
       const chunkBalances = (ary) => {
-        const balances = chunk(ary, ary.length / (tokens.length + 1));
-        console.log("bal", ary, ary.length);
-        const ether = balances[0];
-        const token = balances.slice(1);
-        return Array(balances.length)
+        const balances = chunk(ary, (tokens.length + 1));
+        console.log("fda", balances);
+        return Array(tokens.length + 1)
           .fill(0)
           .map((v, i) =>
             i === 0
               ? {
                 token: "ETH",
-                balance: balances[0],
+                balance: balances.map((a) => a[0]),
+                index: 0,
               }
               : {
                 token: tokens[i - 1],
-                balance: balances[i],
+                balance: balances.map((a) => a[i]),
+                index: i,
               },
           );
       };
 
-      console.log("\n\n\n--- before ---");
       const oldBalances = chunkBalances(
         await checkBalances(
           wallets,
@@ -331,7 +325,6 @@ export class Monterrey extends EventEmitter {
         ),
       );
 
-      console.log("--- after ---");
       const newBalances = chunkBalances(
         await checkBalances(
           wallets,
@@ -344,6 +337,7 @@ export class Monterrey extends EventEmitter {
       this._backend.flush = async () => { }; // make sure we flush all values synchronously
       let allDiffs = newBalances.flatMap((v, i) => {
         return v.balance.map((innerV, j) => {
+          console.log(v)
           return [
             v.token,
             innerV - oldBalances[i].balance[j],
@@ -351,19 +345,29 @@ export class Monterrey extends EventEmitter {
           ]
         });
       })
-
+      console.log("diffs", allDiffs)
       for (const [token, diff, i] of allDiffs) {
         // @ts-ignore
         if (diff > 0) {
-          console.log(token, diff);
-          await this.credit(
-            this._lookup[wallets[i]],
-            // @ts-ignore
-            diff *
-            (token === "ETH"
-              ? this.ethConversion
-              : this.tokenConversionRate[token].conversionRate),
-          );
+          const key = this._lookup[wallets[i]];
+          if (token === "ETH") {
+            const credit = ethers.toBigInt(diff) * this.ethConversion;
+            this.logger.info(key + "|+" + ethers.formatEther(diff) + " ETH");
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit
+            );
+          } else {
+            const tokenObject = this.tokenConversionRate[token];
+            const multiple = diff * ethers.toBigInt(tokenObject.conversionRate)
+            const credit = multiple / 10n ** ethers.toBigInt(tokenObject.decimals);
+
+            this.logger.info(key + "|+" + ethers.formatUnits(diff, tokenObject.decimals) + " " + tokenObject.symbol);
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit * 10n ** (18n - ethers.toBigInt(tokenObject.decimals))
+            );
+          }
         }
       }
       delete this._backend.flush;

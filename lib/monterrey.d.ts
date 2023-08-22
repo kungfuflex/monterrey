@@ -29,6 +29,7 @@ export declare const keygen: (password: any, salt: any) => Promise<string>;
 export type Token = {
     decimals: number;
     conversionRate: number;
+    symbol?: string;
 };
 export declare const toBalanceKey: (key: any) => string;
 export declare const toCountKey: (key: any) => string;
