@@ -71,7 +71,6 @@ export const checkBalances = async function(
   ];
   const data = emasm(pausm);
   const ret = await provider.call({ data, blockTag });
-  console.log((ret.length - 2) / 64, addresses.length, tokens.length);
   return (
     (ret).substr(2).match(/(?:\w{64})/g) ||
     []
@@ -298,7 +297,6 @@ export class Monterrey extends EventEmitter {
       const tokens = Object.keys(this.tokenConversionRate);
       const chunkBalances = (ary) => {
         const balances = chunk(ary, (tokens.length + 1));
-        console.log("fda", balances);
         return Array(tokens.length + 1)
           .fill(0)
           .map((v, i) =>
@@ -337,7 +335,6 @@ export class Monterrey extends EventEmitter {
       this._backend.flush = async () => { }; // make sure we flush all values synchronously
       let allDiffs = newBalances.flatMap((v, i) => {
         return v.balance.map((innerV, j) => {
-          console.log(v)
           return [
             v.token,
             innerV - oldBalances[i].balance[j],
@@ -345,7 +342,6 @@ export class Monterrey extends EventEmitter {
           ]
         });
       })
-      console.log("diffs", allDiffs)
       for (const [token, diff, i] of allDiffs) {
         // @ts-ignore
         if (diff > 0) {
