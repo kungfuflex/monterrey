@@ -1,10 +1,12 @@
 import { pbkdf2 } from "pbkdf2";
 import { EventEmitter } from "events";
+import { chunk } from "lodash";
 import { getLogger } from "./logger";
 import path from "path";
 import { mkdirp } from "mkdirp";
 import fs from "fs-extra";
 import { emasm } from "emasm";
+import { add } from "winston";
 const ethersPromise = import("ethers");
 export type Ethers = Awaited<typeof ethersPromise>;
 let ethers: Ethers = {} as Ethers;
@@ -28,42 +30,80 @@ const toOffset = (v): string => {
 
 export const checkBalances = async function(
   addresses,
+  tokens,
   provider,
-  blockTag = "latest"
+  blockTag = "latest",
 ) {
-  const data = emasm(
+  const pausm = [
+    "0x70a0823100000000000000000000000000000000000000000000000000000000",
+    "0x0",
+    "mstore",
     addresses
       .reduce((r, v, i) => {
-        return r.concat([v, "balance", toOffset(i * 0x20), "mstore"]);
+        const segment = [
+          v,
+          "balance",
+          toOffset(0x24 + i * 0x20 * (tokens.length + 1)),
+          "mstore",
+        ];
+        const tokenSegments = tokens.map((token, tokenIndex) => {
+          return [
+            toOffset(0x20),
+            toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))),
+            "0x24",
+            "0x0",
+            token,
+            "gas",
+            v,
+            "0x4",
+            "mstore",
+            "staticcall",
+            "pop",
+          ];
+        });
+        return r.concat(segment.concat(tokenSegments));
       }, [])
-      .concat([toOffset(0x20 * addresses.length), toOffset(0x0), "return"])
-  );
-
+      .concat([
+        toOffset(0x20 * addresses.length * (tokens.length + 1)),
+        toOffset(0x24),
+        "return",
+      ]),
+  ];
+  const data = emasm(pausm);
+  const ret = await provider.call({ data, blockTag });
   return (
-    (await provider.call({ data, blockTag })).substr(2).match(/(?:\w{64})/g) ||
+    (ret).substr(2).match(/(?:\w{64})/g) ||
     []
   ).map((v) => ethers.toBigInt("0x" + v));
 };
 
-const abi = [
-  'function transfer(address to, uint256 amount) returns (bool)',
-  'function balanceOf(address account) view returns (uint256)'
+const tokenAbi = [
+  {
+    constant: true,
+    inputs: [{ name: "_owner", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ name: "balance", type: "uint256" }],
+    payable: false,
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 
 export const checkTokenBalances = async function(
   addresses,
   provider,
   blockTag = "latest",
-  tokenAddress
+  tokenAddress,
 ) {
-  const tokenContract = new ethers.Contract(tokenAddress, abi, provider);
-  return Promise.all(addresses.map(async (address) => {
-    return tokenContract.balanceOf(address, {
-      blockTag: blockTag,
-    })
-  }));
-}
-
+  const tokenContract = new ethers.Contract(tokenAddress, tokenAbi, provider);
+  return Promise.all(
+    addresses.map(async (address) => {
+      tokenContract.balanceOf(address, {
+        blockTag: blockTag,
+      });
+    }),
+  );
+};
 
 export class FileBackend implements IBackend {
   public pathname: string;
@@ -119,15 +159,15 @@ export const keygen = async (password, salt): Promise<string> => {
       1,
       32,
       (err, result) =>
-        err ? reject(err) : resolve("0x" + Buffer.from(result).toString("hex"))
-    )
+        err ? reject(err) : resolve("0x" + Buffer.from(result).toString("hex")),
+    ),
   );
 };
 
+export type Token = { decimals: number; conversionRate: number; symbol?: string };
+
 export const toBalanceKey = (key) => key + "@@balance";
 export const toCountKey = (key) => key + "@@count";
-
-export type Token = { decimals: number; conversionRate: number };
 
 export class Monterrey extends EventEmitter {
   public _cache: { [key: string]: any };
@@ -147,11 +187,18 @@ export class Monterrey extends EventEmitter {
     return instance;
   }
 
-  constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, ethConversion: ethConversion }) {
+  constructor({
+    salt,
+    backend,
+    logger,
+    provider,
+    tokenConversionRate,
+    ethConversion,
+  }) {
     super();
     if (typeof backend === "string" || !backend)
       this._backend = new FileBackend(
-        backend || path.join(process.env.HOME, ".monterrey")
+        backend || path.join(process.env.HOME, ".monterrey"),
       );
     else this._backend = backend;
     this._salt = salt;
@@ -187,7 +234,7 @@ export class Monterrey extends EventEmitter {
     this.logger.info(key + "|" + String(n));
     const privateKey = await keygen(
       key,
-      ethers.solidityPackedKeccak256(["string", "uint256"], [this._salt, n])
+      ethers.solidityPackedKeccak256(["string", "uint256"], [this._salt, n]),
     );
     this._setCache(key, n, privateKey);
     await this._backend.set(toCountKey(key), (n || 0) + 1);
@@ -197,13 +244,13 @@ export class Monterrey extends EventEmitter {
   async credit(key, amount) {
     const balanceKey = toBalanceKey(key);
     const balance = ethers.toBigInt(
-      (await this._backend.get(balanceKey)) || "0x00"
+      (await this._backend.get(balanceKey)) || "0x00",
     );
     await this._backend.set(
       balanceKey,
-      ethers.toBeHex(balance + BigInt(amount))
+      ethers.toBeHex(balance + BigInt(amount)),
     );
-    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)));
+    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)) + " CREDIT");
     this.emit("credit", { account: key, amount });
     return true;
   }
@@ -211,7 +258,7 @@ export class Monterrey extends EventEmitter {
   async debit(key, amount) {
     const balanceKey = toBalanceKey(key);
     const balance = ethers.toBigInt(
-      (await this._backend.get(balanceKey)) || "0x00"
+      (await this._backend.get(balanceKey)) || "0x00",
     );
     const newBalance = balance - BigInt(amount);
     if (newBalance < 0n) return false;
@@ -247,48 +294,78 @@ export class Monterrey extends EventEmitter {
     if (blockNumber < current) {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
-      const newBalances = await checkBalances(
-        wallets,
-        this.provider,
-        ethers.toBeHex(newBlockNumber)
+      const tokens = Object.keys(this.tokenConversionRate);
+      const chunkBalances = (ary) => {
+        const balances = chunk(ary, (tokens.length + 1));
+        return Array(tokens.length + 1)
+          .fill(0)
+          .map((v, i) =>
+            i === 0
+              ? {
+                token: "ETH",
+                balance: balances.map((a) => a[0]),
+                index: 0,
+              }
+              : {
+                token: tokens[i - 1],
+                balance: balances.map((a) => a[i]),
+                index: i,
+              },
+          );
+      };
+
+      const oldBalances = chunkBalances(
+        await checkBalances(
+          wallets,
+          tokens,
+          this.provider,
+          ethers.toBeHex(blockNumber),
+        ),
       );
 
-      const oldBalances = await checkBalances(
-        wallets,
-        this.provider,
-        ethers.toBeHex(blockNumber)
+      const newBalances = chunkBalances(
+        await checkBalances(
+          wallets,
+          tokens,
+          this.provider,
+          ethers.toBeHex(newBlockNumber),
+        ),
       );
-
       const flush = this._backend.flush;
       this._backend.flush = async () => { }; // make sure we flush all values synchronously
-
-      for (const [diff, i] of newBalances.map((v, i) => [
-        v - oldBalances[i],
-        i,
-      ])) {
+      let allDiffs = newBalances.flatMap((v, i) => {
+        return v.balance.map((innerV, j) => {
+          return [
+            v.token,
+            innerV - oldBalances[i].balance[j],
+            j,
+          ]
+        });
+      })
+      for (const [token, diff, i] of allDiffs) {
+        // @ts-ignore
         if (diff > 0) {
-          await this.credit(this._lookup[wallets[i]], diff * this.ethConversion);
-        }
-      }
+          const key = this._lookup[wallets[i]];
+          if (token === "ETH") {
+            const credit = ethers.toBigInt(diff) * this.ethConversion;
+            this.logger.info(key + "|+" + ethers.formatEther(diff) + " ETH");
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit
+            );
+          } else {
+            const tokenObject = this.tokenConversionRate[token];
+            const multiple = diff * ethers.toBigInt(tokenObject.conversionRate)
+            const credit = multiple / 10n ** ethers.toBigInt(tokenObject.decimals);
 
-      for (const address in this.tokenConversionRate) {
-        let oldBalances = await checkTokenBalances(wallets, this.provider, blockNumber, address);
-        let newBalances = await checkTokenBalances(wallets, this.provider, newBlockNumber, address);
-        const token = this.tokenConversionRate[address];
-
-        for (const [diff, i] of newBalances.map((v, i) => [
-          v - oldBalances[i],
-          i,
-        ])) {
-          if (diff > 0n) {
-            let multiple = ethers.toBigInt(diff) * ethers.toBigInt(token.conversionRate)
-            let credit = multiple / 10n ** ethers.toBigInt(token.decimals)
-            console.log(credit)
-            await this.credit(this._lookup[wallets[i]], credit * 10n ** (18n - ethers.toBigInt(token.decimals)));
+            this.logger.info(key + "|+" + ethers.formatUnits(diff, tokenObject.decimals) + " " + tokenObject.symbol);
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit * 10n ** (18n - ethers.toBigInt(tokenObject.decimals))
+            );
           }
         }
       }
-
       delete this._backend.flush;
       await this._backend.set("@@block", newBlockNumber);
       return true;

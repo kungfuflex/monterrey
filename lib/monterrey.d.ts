@@ -3,7 +3,7 @@ import { EventEmitter } from "events";
 import { getLogger } from "./logger";
 declare const ethersPromise: Promise<typeof import("ethers", { assert: { "resolution-mode": "import" } })>;
 export type Ethers = Awaited<typeof ethersPromise>;
-export declare const checkBalances: (addresses: any, provider: any, blockTag?: string) => Promise<any>;
+export declare const checkBalances: (addresses: any, tokens: any, provider: any, blockTag?: string) => Promise<any>;
 export declare const checkTokenBalances: (addresses: any, provider: any, blockTag: string, tokenAddress: any) => Promise<any[]>;
 export declare class FileBackend implements IBackend {
     pathname: string;
@@ -26,12 +26,13 @@ interface IBackend {
     flush(): Promise<void>;
 }
 export declare const keygen: (password: any, salt: any) => Promise<string>;
-export declare const toBalanceKey: (key: any) => string;
-export declare const toCountKey: (key: any) => string;
 export type Token = {
     decimals: number;
     conversionRate: number;
+    symbol?: string;
 };
+export declare const toBalanceKey: (key: any) => string;
+export declare const toCountKey: (key: any) => string;
 export declare class Monterrey extends EventEmitter {
     _cache: {
         [key: string]: any;
@@ -49,7 +50,7 @@ export declare class Monterrey extends EventEmitter {
     };
     ethConversion: any;
     static create(o: any): Promise<Monterrey>;
-    constructor({ salt, backend, logger, provider, tokenConversionRate: tokenConversionRate, ethConversion: ethConversion }: {
+    constructor({ salt, backend, logger, provider, tokenConversionRate, ethConversion, }: {
         salt: any;
         backend: any;
         logger: any;
