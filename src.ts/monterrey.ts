@@ -1,10 +1,12 @@
 import { pbkdf2 } from "pbkdf2";
 import { EventEmitter } from "events";
+import { chunk } from "lodash";
 import { getLogger } from "./logger";
 import path from "path";
 import { mkdirp } from "mkdirp";
 import fs from "fs-extra";
 import { emasm } from "emasm";
+import { add } from "winston";
 const ethersPromise = import("ethers");
 export type Ethers = Awaited<typeof ethersPromise>;
 let ethers: Ethers = {} as Ethers;
@@ -26,13 +28,13 @@ const toOffset = (v): string => {
   return ethers.toBeHex(ethers.toBigInt(v));
 };
 
-export const checkBalances = async function (
+export const checkBalances = async function(
   addresses,
   tokens,
   provider,
   blockTag = "latest",
 ) {
-  return emasm([
+  const pausm = [
     "0x70a0823100000000000000000000000000000000000000000000000000000000",
     "0x0",
     "mstore",
@@ -44,31 +46,33 @@ export const checkBalances = async function (
           toOffset(0x24 + i * 0x20 * (tokens.length + 1)),
           "mstore",
         ];
-        const tokenSegments = tokens.map((token, tokenIndex) => [
-          toOffset(0x20),
-          toOffset(0x24 + (i * 0x20 * (tokens.length + 1) + tokenIndex)),
-          "0x24",
-          "0x0",
-          "0x0",
-          token,
-          "gas",
-          v,
-          "0x4",
-          "mstore",
-          "staticcall",
-          "pop",
-        ]);
-        return segment.concat(tokenSegments);
+        const tokenSegments = tokens.map((token, tokenIndex) => {
+          return [
+            toOffset(0x20),
+            toOffset(0x24 + (0x20 * (i * (tokens.length + 1) + tokenIndex + 1))),
+            "0x24",
+            "0x0",
+            token,
+            "gas",
+            v,
+            "0x4",
+            "mstore",
+            "staticcall",
+            "pop",
+          ];
+        });
+        return r.concat(segment.concat(tokenSegments));
       }, [])
       .concat([
         toOffset(0x20 * addresses.length * (tokens.length + 1)),
         toOffset(0x24),
         "return",
       ]),
-  ]);
-
+  ];
+  const data = emasm(pausm);
+  const ret = await provider.call({ data, blockTag });
   return (
-    (await provider.call({ data, blockTag })).substr(2).match(/(?:\w{64})/g) ||
+    (ret).substr(2).match(/(?:\w{64})/g) ||
     []
   ).map((v) => ethers.toBigInt("0x" + v));
 };
@@ -85,7 +89,7 @@ const tokenAbi = [
   },
 ];
 
-export const checkTokenBalances = async function (
+export const checkTokenBalances = async function(
   addresses,
   provider,
   blockTag = "latest",
@@ -160,6 +164,8 @@ export const keygen = async (password, salt): Promise<string> => {
   );
 };
 
+export type Token = { decimals: number; conversionRate: number; symbol?: string };
+
 export const toBalanceKey = (key) => key + "@@balance";
 export const toCountKey = (key) => key + "@@count";
 
@@ -171,7 +177,7 @@ export class Monterrey extends EventEmitter {
   public logger: ReturnType<typeof getLogger>;
   public provider: any;
   public ethers: any;
-  public tokenConversionRate: { [key: string]: any };
+  public tokenConversionRate: { [key: string]: Token };
   public ethConversion: any;
 
   static async create(o: any) {
@@ -244,7 +250,7 @@ export class Monterrey extends EventEmitter {
       balanceKey,
       ethers.toBeHex(balance + BigInt(amount)),
     );
-    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)));
+    this.logger.info(key + "|+" + ethers.formatEther(BigInt(amount)) + " CREDIT");
     this.emit("credit", { account: key, amount });
     return true;
   }
@@ -289,33 +295,24 @@ export class Monterrey extends EventEmitter {
       const wallets = (await this.getWallets()).map((v) => v.address);
       const newBlockNumber = blockNumber + 1;
       const tokens = Object.keys(this.tokenConversionRate);
-      const rates = tokens.map((v) => this.tokenConversionRate[v]);
       const chunkBalances = (ary) => {
-        const balances = chunk(ary, ary.length / (tokens.length + 1));
-        const ether = balances[0];
-        const token = balances.slice(1);
-        return Array(balances.length)
+        const balances = chunk(ary, (tokens.length + 1));
+        return Array(tokens.length + 1)
           .fill(0)
           .map((v, i) =>
             i === 0
               ? {
-                  token: "ETH",
-                  balance: balances[0],
-                }
+                token: "ETH",
+                balance: balances.map((a) => a[0]),
+                index: 0,
+              }
               : {
-                  token: tokens[i - 1],
-                  balance: balances[i],
-                },
+                token: tokens[i - 1],
+                balance: balances.map((a) => a[i]),
+                index: i,
+              },
           );
       };
-      const newBalances = chunkBalances(
-        await checkBalances(
-          wallets,
-          tokens,
-          this.provider,
-          ethers.toBeHex(newBlockNumber),
-        ),
-      );
 
       const oldBalances = chunkBalances(
         await checkBalances(
@@ -326,22 +323,47 @@ export class Monterrey extends EventEmitter {
         ),
       );
 
+      const newBalances = chunkBalances(
+        await checkBalances(
+          wallets,
+          tokens,
+          this.provider,
+          ethers.toBeHex(newBlockNumber),
+        ),
+      );
       const flush = this._backend.flush;
-      this._backend.flush = async () => {}; // make sure we flush all values synchronously
-
-      for (const [token, diff, i] of newBalances.map((v, i) => [
-        v.token,
-        v.balance - oldBalances[i].balance,
-        i,
-      ])) {
+      this._backend.flush = async () => { }; // make sure we flush all values synchronously
+      let allDiffs = newBalances.flatMap((v, i) => {
+        return v.balance.map((innerV, j) => {
+          return [
+            v.token,
+            innerV - oldBalances[i].balance[j],
+            j,
+          ]
+        });
+      })
+      for (const [token, diff, i] of allDiffs) {
+        // @ts-ignore
         if (diff > 0) {
-          await this.credit(
-            this._lookup[wallets[i]],
-            diff *
-              (token === "ETH"
-                ? this.ethConversion
-                : this.tokenConversionRate[token]),
-          );
+          const key = this._lookup[wallets[i]];
+          if (token === "ETH") {
+            const credit = ethers.toBigInt(diff) * this.ethConversion;
+            this.logger.info(key + "|+" + ethers.formatEther(diff) + " ETH");
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit
+            );
+          } else {
+            const tokenObject = this.tokenConversionRate[token];
+            const multiple = diff * ethers.toBigInt(tokenObject.conversionRate)
+            const credit = multiple / 10n ** ethers.toBigInt(tokenObject.decimals);
+
+            this.logger.info(key + "|+" + ethers.formatUnits(diff, tokenObject.decimals) + " " + tokenObject.symbol);
+            await this.credit(
+              this._lookup[wallets[i]],
+              credit * 10n ** (18n - ethers.toBigInt(tokenObject.decimals))
+            );
+          }
         }
       }
       delete this._backend.flush;
@@ -361,7 +383,7 @@ export class Monterrey extends EventEmitter {
     };
 
     (async () => {
-      while ((await this.tick()) && !halt) {}
+      while ((await this.tick()) && !halt) { }
       const listener = (block) => {
         (async () => {
           await this.tick();
