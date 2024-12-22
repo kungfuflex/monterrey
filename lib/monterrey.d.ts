@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import { getLogger } from "./logger";
 declare const ethersPromise: Promise<typeof import("ethers", { assert: { "resolution-mode": "import" } })>;
 export type Ethers = Awaited<typeof ethersPromise>;
+export declare const checkTokenBalances: (token: any, addresses: any, provider: any, blockTag?: string) => Promise<any>;
 export declare const checkBalances: (addresses: any, provider: any, blockTag?: string) => Promise<any>;
 export declare class FileBackend implements IBackend {
     pathname: string;
