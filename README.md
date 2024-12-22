@@ -55,6 +55,13 @@ import { ethers } from "ethers";
   const address = "0x494BBCDa6127c80082846F1cB7B6351442f91182";
   const address2 = "0x055D9A4dc18687872D95E2324335AAa4fbd29F05";
   const balanceSheet = await checkTokenBalances(usdt, [ address, address2 ], provider, "latest");
+  /*
+    Balance sheet is a structure like:
+    {
+      [address]: 100n,
+      [address2]: 101n
+    }
+  */
   console.log(Object.entries(balanceSheet))
 })().catch((err) => console.error(err));
 
