@@ -42,6 +42,7 @@ const salt = crypto.randomBytes(32).toString('base64');
   const success = await monterrey.debit(account, ethers.parseEther('0.1');
   if (!success) console.error('insufficient balance');
 })().catch((err) => console.error(err));
+```
 
 ### Fetching Token Balances
 
