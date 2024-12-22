@@ -43,6 +43,20 @@ const salt = crypto.randomBytes(32).toString('base64');
   if (!success) console.error('insufficient balance');
 })().catch((err) => console.error(err));
 
+### Fetching Token Balances
+
+```js
+import { checkTokenBalances } from "monterrey";
+import { ethers } from "ethers";
+(async () => {
+  const provider = new ethers.InfuraProvider('mainnet');
+  const usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+  const address = "0x494BBCDa6127c80082846F1cB7B6351442f91182";
+  const address2 = "0x055D9A4dc18687872D95E2324335AAa4fbd29F05";
+  const balanceSheet = await checkTokenBalances(usdt, [ address, address2 ], provider, "latest");
+  console.log(Object.entries(balanceSheet))
+})().catch((err) => console.error(err));
+
 
 ## Author
 
